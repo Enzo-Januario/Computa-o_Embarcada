@@ -6,8 +6,8 @@
 const int LED_RED    = 10;
 const int LED_YELLOW = 9;
 const int LED_GREEN  = 8;
-const int BOTAO_PIN  = 7;   // Botão no pino D7
-const int POT_PIN    = A0;
+const int BOTAO_PIN  = 7;   // Botão no pino D7 com pull-down externo 10kΩ
+const int POT_PIN    = A0;  // Potenciômetro no pino A0
 
 // Estado de pausa
 bool pausado = false;
@@ -26,7 +26,7 @@ void setup() {
   pinMode(BOTAO_PIN, INPUT); // Pull-down externo de 10kΩ
 
   Serial.begin(9600);
-  Serial.println("=== Semaforo com Controle Iniciado ===");
+  Serial.println("=== Semaforo - Etapa 2 ===");
 }
 
 // =============================================
@@ -40,6 +40,7 @@ void apagarTodos() {
 
 // =============================================
 // Função: Lê o potenciômetro e converte para ms
+// (analogRead 0–1023 → map para 200–2000 ms)
 // =============================================
 int lerIntervalo() {
   int valorPot = analogRead(POT_PIN);
@@ -48,6 +49,7 @@ int lerIntervalo() {
 
 // =============================================
 // Função: Verifica o botão com debounce
+// Quando HIGH → alterna pausa. Se pausado, apaga todos.
 // =============================================
 void verificarBotao() {
   if (digitalRead(BOTAO_PIN) == HIGH) {
@@ -91,7 +93,8 @@ void aguardarComVerificacao(int intervalo) {
 }
 
 // =============================================
-// Função: Acende LED e imprime info na serial
+// Função: Acende LED e imprime intervalo + estado
+// de pausa na serial a cada iteração
 // =============================================
 void acenderSemaforo(int pino, const char* cor) {
   apagarTodos();
@@ -99,7 +102,7 @@ void acenderSemaforo(int pino, const char* cor) {
 
   int intervalo = lerIntervalo();
 
-  Serial.print("Cor ativa: ");
+  Serial.print("Cor: ");
   Serial.print(cor);
   Serial.print(" | Intervalo: ");
   Serial.print(intervalo);
