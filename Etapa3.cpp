@@ -7,6 +7,8 @@ const int POT_PIN    = A0;
 bool modoNoturno = false;
 int  ciclos      = 0;
 
+// ── Helpers ──────────────────────────────────────────────
+
 void apagaTodos() {
   digitalWrite(LED_RED,    LOW);
   digitalWrite(LED_YELLOW, LOW);
@@ -20,13 +22,16 @@ void logSerial(String msg) {
   Serial.println(msg);
 }
 
+// ── Detecção de pressionamento longo (≥ 2s) ─────────────
+// Lógica invertida: INPUT_PULLUP → pressionado = LOW
+
 bool pressionamentoLongo() {
-  if (digitalRead(BTN_PIN) == LOW) return false;
+  if (digitalRead(BTN_PIN) == HIGH) return false;   // Botão solto
 
   unsigned long inicio = millis();
-  while (digitalRead(BTN_PIN) == HIGH) {
+  while (digitalRead(BTN_PIN) == LOW) {              // Enquanto pressionado
     if (millis() - inicio >= 2000) {
-      while (digitalRead(BTN_PIN) == HIGH) delay(10);
+      while (digitalRead(BTN_PIN) == LOW) delay(10); // Espera soltar
       return true;
     }
     delay(10);
@@ -34,17 +39,79 @@ bool pressionamentoLongo() {
   return false;
 }
 
+// ── Pressionamento curto (pausa) ─────────────────────────
+
+bool pressionamentoCurto() {
+  return (digitalRead(BTN_PIN) == LOW);  // Pressionado = LOW com pull-up
+}
+
+// ── Espera responsiva (verifica botão a cada 50ms) ───────
+
+// Retorna: 0 = tempo completo, 1 = modo trocado, 2 = pausado
+int esperaComVerificacao(int tempoTotal) {
+  int passos = tempoTotal / 50;
+
+  for (int i = 0; i < passos; i++) {
+    if (pressionamentoLongo()) {
+      modoNoturno = !modoNoturno;
+      apagaTodos();
+      if (modoNoturno) {
+        logSerial("Modo noturno ATIVADO");
+      } else {
+        logSerial("Modo semaforo RETOMADO");
+      }
+      return 1;
+    }
+
+    if (pressionamentoCurto()) {
+      apagaTodos();
+      logSerial("PAUSADO");
+      // Espera soltar o botão (debounce simples)
+      while (digitalRead(BTN_PIN) == LOW) delay(10);
+      delay(200); // Debounce extra
+      // Espera próximo pressionamento curto para retomar
+      logSerial("Aguardando retomar...");
+      while (true) {
+        if (pressionamentoLongo()) {
+          modoNoturno = !modoNoturno;
+          apagaTodos();
+          if (modoNoturno) {
+            logSerial("Modo noturno ATIVADO");
+          } else {
+            logSerial("Modo semaforo RETOMADO");
+          }
+          return 1;
+        }
+        if (digitalRead(BTN_PIN) == LOW) {
+          while (digitalRead(BTN_PIN) == LOW) delay(10);
+          delay(200);
+          logSerial("RETOMADO");
+          return 2;
+        }
+        delay(10);
+      }
+    }
+
+    delay(50);
+  }
+  return 0;
+}
+
+// ── Setup ────────────────────────────────────────────────
+
 void setup() {
   pinMode(LED_RED,    OUTPUT);
   pinMode(LED_YELLOW, OUTPUT);
   pinMode(LED_GREEN,  OUTPUT);
-  pinMode(BTN_PIN,    INPUT);
+  pinMode(BTN_PIN,    INPUT_PULLUP);  // ✅ Pull-up interno ativado
   Serial.begin(9600);
   logSerial("Sistema iniciado");
 }
 
+// ── Loop principal ───────────────────────────────────────
+
 void loop() {
-  // Verifica pressionamento longo (troca de modo)
+  // Verifica troca de modo
   if (pressionamentoLongo()) {
     modoNoturno = !modoNoturno;
     apagaTodos();
@@ -56,60 +123,44 @@ void loop() {
     return;
   }
 
+  // ── Modo Noturno ──────────────────────────────────────
+
   if (modoNoturno) {
-    // Pisca amarelo verificando o botão a cada 50ms
     Serial.println("MODO NOTURNO");
+
     digitalWrite(LED_YELLOW, HIGH);
-    for (int i = 0; i < 10; i++) {  // 10 x 50ms = 500ms
-      if (pressionamentoLongo()) {
-        modoNoturno = false;
-        apagaTodos();
-        logSerial("Modo semaforo RETOMADO");
-        return;
-      }
-      delay(50);
-    }
+    if (esperaComVerificacao(500) != 0) return;
+
     digitalWrite(LED_YELLOW, LOW);
-    for (int i = 0; i < 10; i++) {  // 10 x 50ms = 500ms
-      if (pressionamentoLongo()) {
-        modoNoturno = false;
-        apagaTodos();
-        logSerial("Modo semaforo RETOMADO");
-        return;
-      }
-      delay(50);
-    }
+    if (esperaComVerificacao(500) != 0) return;
+
     return;
   }
 
-  // Verifica pausa (pressionamento curto)
-  if (digitalRead(BTN_PIN) == HIGH) {
-    apagaTodos();
-    logSerial("PAUSADO");
-    while (digitalRead(BTN_PIN) == HIGH) delay(10);
-    return;
-  }
+  // ── Modo Semáforo ─────────────────────────────────────
 
-  // Lê potenciômetro
+  // VERDE
   int intervalo = map(analogRead(POT_PIN), 0, 1023, 200, 2000);
-
-  // Ciclo semáforo: vermelho → amarelo → verde
   logSerial("Verde | Intervalo: " + String(intervalo) + "ms");
   apagaTodos();
-  digitalWrite(LED_RED, HIGH);
-  delay(intervalo);
+  digitalWrite(LED_GREEN, HIGH);          // ✅ Verde correto
+  if (esperaComVerificacao(intervalo) != 0) return;
 
+  // AMARELO
+  intervalo = map(analogRead(POT_PIN), 0, 1023, 200, 2000);
   logSerial("Amarelo | Intervalo: " + String(intervalo) + "ms");
   apagaTodos();
   digitalWrite(LED_YELLOW, HIGH);
-  delay(intervalo);
+  if (esperaComVerificacao(intervalo) != 0) return;
 
+  // VERMELHO
+  intervalo = map(analogRead(POT_PIN), 0, 1023, 200, 2000);
   logSerial("Vermelho | Intervalo: " + String(intervalo) + "ms");
   apagaTodos();
-  digitalWrite(LED_GREEN, HIGH);
-  delay(intervalo);
+  digitalWrite(LED_RED, HIGH);            // ✅ Vermelho correto
+  if (esperaComVerificacao(intervalo) != 0) return;
 
-  // Conta ciclo completo
+  // Contagem de ciclos
   ciclos++;
   logSerial("Ciclos completos: " + String(ciclos));
   if (ciclos % 5 == 0) {
